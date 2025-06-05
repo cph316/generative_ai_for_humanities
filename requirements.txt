@@ -1,0 +1,14 @@
+gradio
+requests
+openai
+folium
+geopy
+fpdf
+pillow
+diffusers
+accelerate
+transformers
+safetensors
+torch
+torchvision
+torchaudio
