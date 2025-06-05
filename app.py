@@ -334,7 +334,9 @@ with gr.Blocks() as demo:
         pdf_download = gr.HTML(label="下載 PDF", visible=True)
         error_output = gr.Textbox(label="錯誤訊息", lines=3)
 
-        def ai_travel_assistant_all(location, preference, budget, days, group, transport, style_choice, show_image, show_map, show_pdf, pdf_name_input="cd.pdf"):
+        # def ai_travel_assistant_all(location, preference, budget, days, group, transport, style_choice, show_image, show_map, show_pdf, pdf_name_input="cd.pdf"):
+        def ai_travel_assistant_all(location, preference, budget, days, group, transport, style_choice, show_options, pdf_name_input="cd.pdf"):       
+        
             try:
                 user_prompt = (
                     f"請根據以下資訊規劃個人化旅遊建議，包含路線/景點/活動。\n"
@@ -347,6 +349,10 @@ with gr.Blocks() as demo:
                     f"請條列化建議內容。"
                 )
                 llm_result, _ = llm_reply(user_prompt)
+                show_image = "顯示圖像" in show_options
+                show_map = "顯示地圖" in show_options
+                show_pdf = "下載 PDF" in show_options                
+
                 image_result = generate_cover_image(location, style_choice) if show_image else None
                 agent_result = agent_plan_route(location, preference, budget, days, group, transport)
                 map_html = generate_map_html(location) if show_map else ""
