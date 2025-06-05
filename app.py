@@ -320,7 +320,7 @@ with gr.Blocks() as demo:
 
         with gr.Row():
         # 新增多選框讓使用者選擇要顯示哪些內容
-        show_image = gr.Checkbox(label="顯示圖像", value=True)
+            show_image = gr.Checkbox(label="顯示圖像", value=True)
         show_map = gr.Checkbox(label="顯示地圖", value=True)
         show_pdf = gr.Checkbox(label="顯示 PDF", value=True)
         submit = gr.Button("生成")
