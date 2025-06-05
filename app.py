@@ -15,6 +15,7 @@ from fpdf import FPDF
 import io  # 用於處理記憶體檔案
 from io import BytesIO # 用於圖片轉為記憶體檔案
 from base64 import b64encode  # 用來將 PDF 轉成 base64 字串以便 HTML 下載 
+
 import warnings
 
 # 直接從環境變數取得金鑰（Hugging Face 會自動注入 Secret）
@@ -183,18 +184,15 @@ def generate_map_html(location_name):
 #加圖片版(目前用這個)
 # -*- coding: utf-8 -*-
 # 下載支援中文字型的 Noto Sans CJK 字型檔（Regular 與 Bold）
-!wget -O NotoSansCJKtc-Regular.ttf "https://github.com/googlefonts/noto-cjk/raw/main/Sans/OTF/TraditionalChinese/NotoSansCJKtc-Regular.otf"
-!wget -O NotoSansCJKtc-Bold.otf "https://raw.githubusercontent.com/notofonts/noto-cjk/main/Sans/OTF/TraditionalChinese/NotoSansCJKtc-Bold.otf"
+# !wget -O NotoSansCJKtc-Regular.ttf "https://github.com/googlefonts/noto-cjk/raw/main/Sans/OTF/TraditionalChinese/NotoSansCJKtc-Regular.otf"
+# !wget -O NotoSansCJKtc-Bold.otf "https://raw.githubusercontent.com/notofonts/noto-cjk/main/Sans/OTF/TraditionalChinese/NotoSansCJKtc-Bold.otf"
 
 # 定義產生 PDF 並內嵌圖片與文字內容的函式
-def generate_and_display_pdf(image, text="hello world", filename="fpdf2-demo.pdf", font_size=14, width=800, height=400, font_path="/content/NotoSansCJKtc-Regular.ttf"):
-    # 匯入所需模組
-    import warnings
-    from fpdf import FPDF  # 用來產生 PDF
-    from base64 import b64encode  # 用來將 PDF 轉成 base64 字串以便 HTML 下載
-    from IPython.display import display, HTML  # 用於 Jupyter Notebook 內嵌 HTML
-    import io  # 用於圖片轉為記憶體檔案
-
+# def generate_and_display_pdf(image, text="hello world", filename="fpdf2-demo.pdf", font_size=14, width=800, height=400, font_path="/content/NotoSansCJKtc-Regular.ttf"):
+def generate_and_display_pdf(
+    image, text="hello world", filename="fpdf2-demo.pdf", font_size=14, width=800, height=400,
+    font_path="NotoSansCJKtc-Regular.otf", bold_font_path="NotoSansCJKtc-Bold.otf"
+):
     # 顯示 Python 的棄用警告（有助於除錯）
     warnings.simplefilter('default', DeprecationWarning)
 
@@ -205,11 +203,13 @@ def generate_and_display_pdf(image, text="hello world", filename="fpdf2-demo.pdf
     # 註冊並使用中文字型
     pdf.add_font('NotoSansCJKtc', '', font_path, uni=True)  # Regular
     pdf.set_font('NotoSansCJKtc', size=font_size)  # 預設字型
-    pdf.add_font('NotoSansCJKtc', 'B', 'NotoSansCJKtc-Bold.otf')  # Bold
+    # pdf.add_font('NotoSansCJKtc', 'B', 'NotoSansCJKtc-Bold.otf')  # Bold
+    pdf.add_font('NotoSansCJKtc', 'B', bold_font_path, uni=True)
     pdf.set_font('NotoSansCJKtc', style='B', size=font_size)  # 設定為粗體
 
     # ===== 圖片頁首處理 =====
-    image_buffer = io.BytesIO()  # 建立記憶體檔案物件
+    # image_buffer = io.BytesIO()  # 建立記憶體檔案物件
+    image_buffer = BytesIO()
     image.save(image_buffer, format="PNG")  # 將 PIL 圖片存為 PNG 格式
     image_buffer.seek(0)  # 將檔案指標移至開頭
     pdf.image(image_buffer, x=10, y=20, w=pdf.w - 20)  # 將圖片插入 PDF 頁面
@@ -239,7 +239,7 @@ def generate_and_display_pdf(image, text="hello world", filename="fpdf2-demo.pdf
 
         elif line.startswith('*'):  # 列表項目
             pdf.set_x(pdf.l_margin + 10)  # 稍微縮排
-            pdf.multi_cell(safe_width-10, font_size, line[1:].strip(),line.replace('**','')) ###
+            pdf.multi_cell(safe_width-10, font_size, line[1:].strip())
 
         else:  # 一般段落
             if '**' in line:
@@ -265,62 +265,30 @@ def generate_and_display_pdf(image, text="hello world", filename="fpdf2-demo.pdf
                     # 中文計算寬度
                     text_width = pdf.get_string_width(seg_text)
                     # 斷行（超出就跳行）
-                    # if curr_width + text_width > max_width:
-                    #     pdf.ln(line_height)
-                    #     pdf.ln(line[curr_width+curr_width,:])
-                    #     pdf.set_x(pdf.l_margin + 5)
-                    #     curr_width = 0
-                    # pdf.cell(text_width, line_height, seg_text, ln=0, align='L')
-                    # curr_width += text_width
                     i = 0
                     while i < len(seg_text):
                       char = seg_text[i]
                       char_width = pdf.get_string_width(char)
                       if curr_width + char_width > max_width:
-                        pdf.ln(line_height)
-                        pdf.set_x(pdf.l_margin + 5)
+                        pdf.ln(line_height)                        pdf.set_x(pdf.l_margin + 5)
                         curr_width = 0
                       pdf.cell(char_width, line_height, char, ln=0)
                       curr_width += char_width
                       i += 1
                 pdf.ln(line_height)
-                #     text_width = pdf.get_string_width(seg_text)
-                #     pdf.cell(text_width, line_height, seg_text, ln=0, align='L')
-                # pdf.ln(line_height)  # 一整行結束再換行
-
-
-
-                # for seg_text, is_bold in segments:
-                #     seg_text = seg_text.strip()
-                #     if not seg_text:
-                #        continue
-                #     pdf.set_font('NotoSansCJKtc', style='B' if is_bold else '', size=font_size)
-                #     pdf.set_x(pdf.l_margin + 5)  # 稍微縮排
-                #     pdf.multi_cell(safe_width - 20, font_size + 2, seg_text, align='L')
             else:
                 pdf.set_font('NotoSansCJKtc', style='', size=font_size)
                 pdf.set_x(pdf.l_margin + 5)  # 稍微縮排
                 pdf.multi_cell(safe_width, font_size + 2, line, align='L')
-            # pdf.set_x(pdf.l_margin + 5)
-            # pdf.multi_cell(safe_width-20, font_size+2, line, align='L')
 
     # 將 PDF 轉為 byte 並編碼成 base64 字串
-    pdf_bytes = pdf.output()
+    # pdf_bytes = pdf.output()
+    pdf_bytes = pdf.output(dest='S').encode('latin1')
     base64_pdf = b64encode(pdf_bytes).decode("utf-8")
 
     # 回傳 HTML 的下載連結
     html_download = f'<a download="{filename}" href="data:application/pdf;base64,{base64_pdf}">下載 PDF</a>'
-    #display(html_download)
     return html_download
-
-    # 輸出 PDF
-    #pdf_bytes = pdf.output(dest="S")
-    pdf_bytes = pdf.output()
-    base64_pdf = b64encode(pdf_bytes).decode("utf-8")
-    #html_preview = f'<embed src="data:application/pdf;base64,{base64_pdf}" width="{width}" height="{height}" type="application/pdf">'
-    html_download = f'<a download="{filename}" href="data:application/pdf;base64,{base64_pdf}">下載 PDF</a>'
-    display(html_download)
-
 
 # 📌設定 Gradio 介面
 with gr.Blocks() as demo:
