@@ -18,10 +18,11 @@ jobs:
           git config --global user.email "you@example.com"
           git config --global user.name "Your Name"
 
-          git clone https://huggingface.co/spaces/YOUR_USERNAME/YOUR_SPACE_NAME space_repo
+          git clone https://Yinchun:${HF_TOKEN}@huggingface.co/spaces/Yinchun/Travel_Assistant space_repo
           cp -r * space_repo/
           cd space_repo
 
           git add .
-          git commit -m "🚀 Auto deploy from GitHub Actions"
-          git push https://huggingface.co/YOUR_USERNAME:$HF_TOKEN@huggingface.co/spaces/YOUR_USERNAME/YOUR_SPACE_NAME main
+          git commit -m "🚀 Auto deploy from GitHub Actions" || echo "No changes to commit"
+          git push https://Yinchun:${HF_TOKEN}@huggingface.co/spaces/Yinchun/Travel_Assistant main
+
