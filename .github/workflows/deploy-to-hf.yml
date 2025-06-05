@@ -1,0 +1,29 @@
+name: Deploy to Hugging Face Space
+
+on:
+  push:
+    branches: [main]  # 推送 main 分支就會部署
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Git identity
+        run: |
+          git config --global user.email "deploy@github.com"
+          git config --global user.name "GitHub Actions"
+
+      - name: Push to Hugging Face Space
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          git clone https://huggingface.co/spaces/Yinchun/Travel_Assistant space_repo
+          cp -r * space_repo/
+          cp -r .[^.]* space_repo/ || true  # 複製隱藏檔（如 .streamlit）但不報錯
+          cd space_repo
+          git add .
+          git commit -m "🚀 Auto-deploy from GitHub Actions" || echo "No changes to commit"
+          git push https://huggingface.co/YOUR_USERNAME:$HF_TOKEN@huggingface.co/spaces/Yinchun/Travel_Assistant main
