@@ -2,14 +2,16 @@ name: Deploy to Hugging Face Space
 
 on:
   push:
-    branches: [main]  # 當推送到 main 時自動部署
+    branches: [main]
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Repository
+      - name: Checkout Repository (full history)
         uses: actions/checkout@v3
+        with:
+          fetch-depth: 0  # ←←← 加這行解決 shallow clone 問題
 
       - name: Push to Hugging Face Space
         env:
@@ -18,15 +20,9 @@ jobs:
           git config --global user.email "you@example.com"
           git config --global user.name "GitHub Actions"
 
-          # Clone Hugging Face Space repository
           git clone https://huggingface.co/spaces/Yinchun/Travel_Assistant space_repo
-
-          # Copy all files except the cloned directory itself
           rsync -av --exclude=space_repo ./ space_repo/
-
           cd space_repo
-
-          # Commit and push changes (skip error if no changes)
           git add .
           git commit -m "🚀 Auto deploy from GitHub Actions" || echo "No changes to commit"
-          git push -f https://Yinchun:${HF_TOKEN}@huggingface.co/spaces/Yinchun/Travel_Assistant main
+          git push https://Yinchun:${HF_TOKEN}@huggingface.co/spaces/Yinchun/Travel_Assistant main
