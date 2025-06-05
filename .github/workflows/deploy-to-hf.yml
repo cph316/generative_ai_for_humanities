@@ -8,21 +8,24 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Repository (full history)
+      - name: Checkout Repository
         uses: actions/checkout@v3
-        with:
-          fetch-depth: 0  # ←←← 加這行解決 shallow clone 問題
+
+      - name: Setup Git Identity
+        run: |
+          git config --global user.email "you@example.com"
+          git config --global user.name "GitHub Actions"
 
       - name: Push to Hugging Face Space
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
-          git config --global user.email "you@example.com"
-          git config --global user.name "GitHub Actions"
+          git clone https://Yinchun:${HF_TOKEN}@huggingface.co/spaces/Yinchun/Travel_Assistant space_repo
 
-          git clone https://huggingface.co/spaces/Yinchun/Travel_Assistant space_repo
-          rsync -av --exclude=space_repo ./ space_repo/
+          # 避免把 space_repo 複製進自己
+          rsync -av --exclude='space_repo' ./ space_repo/
+
           cd space_repo
           git add .
           git commit -m "🚀 Auto deploy from GitHub Actions" || echo "No changes to commit"
-          git push https://Yinchun:${HF_TOKEN}@huggingface.co/spaces/Yinchun/Travel_Assistant main
+          git push --force https://Yinchun:${HF_TOKEN}@huggingface.co/spaces/Yinchun/Travel_Assistant main
