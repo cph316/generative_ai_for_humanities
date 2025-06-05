@@ -315,7 +315,7 @@ with gr.Blocks() as demo:
                 choices=list(STYLE_PRESETS.keys()),
                 value=DEFAULT_STYLE_KEY,
                 label="圖像風格（請選擇一項）"
-            )         
+            )          
 
 
         with gr.Row():
@@ -358,7 +358,7 @@ with gr.Blocks() as demo:
 
         submit.click(
             fn=ai_travel_assistant_all,
-            inputs=[location, preference, budget, days, group, transport, style_choice, show_image, show_map, show_pdf],
+            inputs=[location, preference, budget, days, group, transport, style_choice, show_options],
             outputs=[llm_output, image_output, agent_output, map_display, pdf_download, error_output]
         )
 
