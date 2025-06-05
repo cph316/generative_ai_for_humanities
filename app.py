@@ -270,7 +270,8 @@ def generate_and_display_pdf(
                       char = seg_text[i]
                       char_width = pdf.get_string_width(char)
                       if curr_width + char_width > max_width:
-                        pdf.ln(line_height)                        pdf.set_x(pdf.l_margin + 5)
+                        pdf.ln(line_height)                        
+                        pdf.set_x(pdf.l_margin + 5)
                         curr_width = 0
                       pdf.cell(char_width, line_height, char, ln=0)
                       curr_width += char_width
