@@ -315,15 +315,17 @@ with gr.Blocks() as demo:
                 choices=list(STYLE_PRESETS.keys()),
                 value=DEFAULT_STYLE_KEY,
                 label="圖像風格（請選擇一項）"
-            )          
+            )         
 
 
         with gr.Row():
-        # 新增多選框讓使用者選擇要顯示哪些內容
-            show_image = gr.Checkbox(label="顯示圖像", value=True)
-        show_map = gr.Checkbox(label="顯示地圖", value=True)
-        show_pdf = gr.Checkbox(label="顯示 PDF", value=True)
-        submit = gr.Button("生成")
+            show_options = gr.CheckboxGroup(
+                choices=["顯示圖像", "顯示地圖", "下載 PDF"],
+                label="顯示選項",
+                value=["顯示圖像"],  # 預設勾選，可自行調整
+                type="value"
+            )
+            submit = gr.Button("生成")
 
         llm_output = gr.Textbox(label="旅遊建議（RAG+LLM推薦景點）", lines=5)
         image_output = gr.Image(label="專屬旅遊場景圖片", visible=True)
