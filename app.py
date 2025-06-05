@@ -314,56 +314,99 @@ with gr.Blocks() as demo:
                 choices=list(STYLE_PRESETS.keys()),
                 value=DEFAULT_STYLE_KEY,
                 label="圖像風格（請選擇一項）"
-            )
-            
+            )          
+
+
         with gr.Row():
-            submit = gr.Button("生成旅遊建議、圖像、地圖與 PDF")
+        # 新增多選框讓使用者選擇要顯示哪些內容
+        show_image = gr.Checkbox(label="顯示圖像", value=True)
+        show_map = gr.Checkbox(label="顯示地圖", value=True)
+        show_pdf = gr.Checkbox(label="顯示 PDF", value=True)
+        submit = gr.Button("生成")
+
         llm_output = gr.Textbox(label="旅遊建議（RAG+LLM推薦景點）", lines=5)
-        image_output = gr.Image(label="專屬旅遊場景圖片")
+        image_output = gr.Image(label="專屬旅遊場景圖片", visible=True)
         agent_output = gr.Textbox(label="AI Agents 行程規劃 (Reflection & Planning)", lines=10)
-        map_display = gr.HTML(label="地圖顯示") # ⬅ 新增地圖顯示欄位
-        pdf_download = gr.HTML(label="下載 PDF")
+        map_display = gr.HTML(label="地圖顯示", visible=True)
+        pdf_download = gr.HTML(label="下載 PDF", visible=True)
         error_output = gr.Textbox(label="錯誤訊息", lines=3)
 
-        def ai_travel_assistant_all(location, preference, budget, days, group, transport, style_choice, pdf_name_input="cd.pdf"):
+        def ai_travel_assistant_all(location, preference, budget, days, group, transport, style_choice, show_image, show_map, show_pdf, pdf_name_input="cd.pdf"):
             try:
                 user_prompt = (
-                f"請根據以下資訊規劃個人化旅遊建議，包含路線/景點/活動。\n"
-                f"地點：{location}\n"
-                f"旅遊偏好：{preference}\n"
-                f"預算：{budget}\n"
-                f"天數：{days}\n"
-                f"人數或身份：{group}\n"
-                f"交通方式：{transport}\n"
-                f"請條列化建議內容。"
+                    f"請根據以下資訊規劃個人化旅遊建議，包含路線/景點/活動。\n"
+                    f"地點：{location}\n"
+                    f"旅遊偏好：{preference}\n"
+                    f"預算：{budget}\n"
+                    f"天數：{days}\n"
+                    f"人數或身份：{group}\n"
+                    f"交通方式：{transport}\n"
+                    f"請條列化建議內容。"
                 )
-                # 1) LLM 文字建議
                 llm_result, _ = llm_reply(user_prompt)
-
-                # 2) 生成封面圖
-                image_result = generate_cover_image(location, style_choice)
-
-                # 3) AI Agents (Reflection + Planning)
+                image_result = generate_cover_image(location, style_choice) if show_image else None
                 agent_result = agent_plan_route(location, preference, budget, days, group, transport)
-
-                # 4) 用 generate_map_html 函數生成地圖
-                map_html = generate_map_html(location)  # ⬅ 加入地圖
-
-                # 5) PDF
+                map_html = generate_map_html(location) if show_map else ""
                 pdf_text = llm_result + agent_result
-                PP = generate_and_display_pdf(image=image_result ,text=pdf_text, filename="AI_Travel_Plan.pdf", font_size=14, width=800, height=400)
-
+                PP = generate_and_display_pdf(image=image_result, text=pdf_text, filename="AI_Travel_Plan.pdf", font_size=14, width=800, height=400) if show_pdf else ""
                 return llm_result, image_result, agent_result, map_html, PP, ""
             except Exception as e:
-                # 發生錯誤時回傳錯誤訊息，其它欄位設為空或 None
                 return "發生錯誤，請稍後再試", None, "", "", None, str(e)
 
         submit.click(
             fn=ai_travel_assistant_all,
-            inputs=[location, preference, budget, days, group, transport, style_choice],
-            # outputs=[llm_output, image_output, agent_output, map_display, pdf_download]
+            inputs=[location, preference, budget, days, group, transport, style_choice, show_image, show_map, show_pdf],
             outputs=[llm_output, image_output, agent_output, map_display, pdf_download, error_output]
         )
+
+
+        # with gr.Row():
+        #     submit = gr.Button("生成旅遊建議、圖像、地圖與 PDF")
+        # llm_output = gr.Textbox(label="旅遊建議（RAG+LLM推薦景點）", lines=5)
+        # image_output = gr.Image(label="專屬旅遊場景圖片")
+        # agent_output = gr.Textbox(label="AI Agents 行程規劃 (Reflection & Planning)", lines=10)
+        # map_display = gr.HTML(label="地圖顯示") # ⬅ 新增地圖顯示欄位
+        # pdf_download = gr.HTML(label="下載 PDF")
+        # error_output = gr.Textbox(label="錯誤訊息", lines=3)
+
+        # def ai_travel_assistant_all(location, preference, budget, days, group, transport, style_choice, pdf_name_input="cd.pdf"):
+        #     try:
+        #         user_prompt = (
+        #         f"請根據以下資訊規劃個人化旅遊建議，包含路線/景點/活動。\n"
+        #         f"地點：{location}\n"
+        #         f"旅遊偏好：{preference}\n"
+        #         f"預算：{budget}\n"
+        #         f"天數：{days}\n"
+        #         f"人數或身份：{group}\n"
+        #         f"交通方式：{transport}\n"
+        #         f"請條列化建議內容。"
+        #         )
+        #         # 1) LLM 文字建議
+        #         llm_result, _ = llm_reply(user_prompt)
+
+        #         # 2) 生成封面圖
+        #         image_result = generate_cover_image(location, style_choice)
+
+        #         # 3) AI Agents (Reflection + Planning)
+        #         agent_result = agent_plan_route(location, preference, budget, days, group, transport)
+
+        #         # 4) 用 generate_map_html 函數生成地圖
+        #         map_html = generate_map_html(location)  # ⬅ 加入地圖
+
+        #         # 5) PDF
+        #         pdf_text = llm_result + agent_result
+        #         PP = generate_and_display_pdf(image=image_result ,text=pdf_text, filename="AI_Travel_Plan.pdf", font_size=14, width=800, height=400)
+
+        #         return llm_result, image_result, agent_result, map_html, PP, ""
+        #     except Exception as e:
+        #         # 發生錯誤時回傳錯誤訊息，其它欄位設為空或 None
+        #         return "發生錯誤，請稍後再試", None, "", "", None, str(e)
+
+        # submit.click(
+        #     fn=ai_travel_assistant_all,
+        #     inputs=[location, preference, budget, days, group, transport, style_choice],
+        #     outputs=[llm_output, image_output, agent_output, map_display, pdf_download, error_output]
+        # )
 
     with gr.Tab("互動式旅遊聊天機器人"):
         chatbox = gr.Chatbot(label="旅遊小助手：自由提問、推薦、查詢、規劃皆可")
