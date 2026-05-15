@@ -13,10 +13,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, UTC
 import math
 import re
 from typing import Dict, List, Optional, Tuple
+
+import requests
+import pandas as pd
 
 
 # -----------------------
@@ -262,7 +265,7 @@ class GraphRAGEngine:
                     f"- {doc.company} {doc.period} p.{doc.page}（score={score:.3f}）{doc.url}"
                 )
 
-        lines.append(f"【產生時間】{datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC")
+        lines.append(f"【產生時間】{datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S')} UTC")
         return "\n".join(lines)
 
     @staticmethod
@@ -340,7 +343,24 @@ def load_demo_graph() -> Tuple[FinancialGraph, TfidfRetriever]:
 
 
 def main() -> None:
-    graph, retriever = load_demo_graph()
+    import argparse
+
+    parser = argparse.ArgumentParser(description="台灣財報 Graph RAG 問答")
+    parser.add_argument("--use-real-data", action="store_true", help="使用 MOPS 真實財報資料")
+    parser.add_argument("--company-id", default="2330")
+    parser.add_argument("--roc-year", type=int, default=114, help="民國年，例如 114=2025")
+    parser.add_argument("--season", type=int, default=4, choices=[1,2,3,4])
+    args = parser.parse_args()
+
+    if args.use_real_data:
+        try:
+            graph, retriever = load_real_graph(args.company_id, args.roc_year, args.season)
+            print(f"已載入 MOPS 真實資料：{args.company_id} {args.roc_year}Q{args.season}")
+        except Exception as exc:
+            print(f"載入真實資料失敗，改用 demo：{exc}")
+            graph, retriever = load_demo_graph()
+    else:
+        graph, retriever = load_demo_graph()
     engine = GraphRAGEngine(graph, retriever)
 
     print("台灣財報 Graph RAG 問答系統（輸入 exit 離開）")
@@ -350,6 +370,55 @@ def main() -> None:
             print("已結束。")
             break
         print("\n" + engine.answer(query))
+
+
+def fetch_real_mops_quarterly_report(company_id: str, roc_year: int, season: int) -> List[SourceChunk]:
+    """從 MOPS 抓取單季財報表格文字，作為真實資料來源 chunk。"""
+    url = "https://mops.twse.com.tw/mops/web/ajax_t164sb04"
+    payload = {
+        "encodeURIComponent": "1",
+        "step": "1",
+        "firstin": "1",
+        "off": "1",
+        "co_id": company_id,
+        "year": str(roc_year),
+        "season": str(season),
+    }
+    headers = {"User-Agent": "Mozilla/5.0"}
+    resp = requests.post(url, data=payload, headers=headers, timeout=20)
+    resp.raise_for_status()
+    tables = pd.read_html(resp.text)
+
+    period = f"{roc_year + 1911}Q{season}"
+    chunks: List[SourceChunk] = []
+    for i, tb in enumerate(tables[:6], start=1):
+        text = tb.astype(str).head(15).to_string(index=False)
+        chunks.append(
+            SourceChunk(
+                chunk_id=f"real_{company_id}_{period}_{i}",
+                company=company_id,
+                period=period,
+                page=i,
+                text=text,
+                url=url,
+            )
+        )
+    return chunks
+
+
+def load_real_graph(company_id: str = "2330", roc_year: int = 114, season: int = 4) -> Tuple[FinancialGraph, TfidfRetriever]:
+    graph = FinancialGraph()
+    company = Company(ticker=company_id, name=company_id, industry="未知", market="TWSE")
+
+    chunks = fetch_real_mops_quarterly_report(company_id, roc_year, season)
+    period = f"{roc_year + 1911}Q{season}"
+    report = Report(period=period, report_type="季報", publish_date="N/A", chunks=chunks)
+    company.reports[period] = report
+    graph.upsert_company(company)
+
+    retriever = TfidfRetriever()
+    retriever.fit(chunks)
+    return graph, retriever
 
 
 if __name__ == "__main__":
