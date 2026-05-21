@@ -13,7 +13,6 @@ import requests
 
 BASE_URL = "https://ic.tpex.org.tw/introduce.php"
 
-# 依中文語意粗分供應鏈位置（僅輔助標籤，不影響實際公司歸屬）
 UPSTREAM_KEYWORDS = ("材料", "基板", "矽晶圓", "設備", "化學", "氣體", "光罩")
 MIDSTREAM_KEYWORDS = ("設計", "晶圓", "製造", "製程", "代工", "IP", "IC")
 DOWNSTREAM_KEYWORDS = ("封裝", "測試", "模組", "通路", "組裝", "終端")
@@ -49,70 +48,113 @@ def infer_chain_level(stage_name: str) -> str:
     return "未分類"
 
 
-def parse_popup_sections(html: str) -> Dict[str, List[Tuple[str, str]]]:
-    """解析每個步驟視窗中的公司清單。
-
-    回傳格式:
-        {步驟名稱: [(公司類型, 公司名稱), ...]}
-    """
-    # 常見：每個 popup 會先出現步驟標題，再包含 company-list 區塊。
-    # 用非貪婪方式配對，避免跨到下一個區塊。
-    pattern = re.compile(
-        r"<div[^>]*class=\"[^\"]*ui-dialog-titlebar[^\"]*\"[^>]*>"
-        r".*?<span[^>]*class=\"[^\"]*ui-dialog-title[^\"]*\"[^>]*>(.*?)</span>"
-        r"(.*?)"
-        r"<div[^>]*class=\"[^\"]*company-list[^\"]*\"[^>]*>(.*?)</div>",
-        re.I | re.S,
+def _extract_companies_with_categories(list_html: str) -> List[Tuple[str, str]]:
+    category_iter = list(
+        re.finditer(
+            r"(本國上市公司|本國上櫃公司|本國興櫃公司|本國公發公司|知名外國企業)\s*\(\d+家\)",
+            list_html,
+            re.I,
+        )
     )
 
-    out: Dict[str, List[Tuple[str, str]]] = OrderedDict()
-
-    for title_html, between_html, list_html in pattern.findall(html):
-        stage_name = clean_text(title_html)
-        if not stage_name or len(stage_name) > 80:
-            continue
-
-        # 在 company-list 內找分組標題（例如本國上市公司、本國上櫃公司）與公司名。
-        # 分段切法：先抓所有分類標題位置，再切片抓該段公司。
-        category_iter = list(
-            re.finditer(
-                r"(本國上市公司|本國上櫃公司|本國興櫃公司|本國公發公司|知名外國企業)\s*\(\d+家\)",
-                list_html,
-                re.I,
-            )
-        )
-
-        companies: List[Tuple[str, str]] = []
-        if category_iter:
-            for i, m in enumerate(category_iter):
-                category = clean_text(m.group(1))
-                seg_start = m.end()
-                seg_end = category_iter[i + 1].start() if i + 1 < len(category_iter) else len(list_html)
-                segment = list_html[seg_start:seg_end]
-                for anchor in re.findall(
-                    r"<a[^>]*href=\"[^\"]*company_basic\.php\?stk_code=\d+[^\"]*\"[^>]*>(.*?)</a>",
-                    segment,
-                    re.I | re.S,
-                ):
-                    name = clean_text(anchor)
-                    if not name:
-                        continue
-                    if "外國" in category:
-                        continue
-                    companies.append((category, name))
-        else:
+    companies: List[Tuple[str, str]] = []
+    if category_iter:
+        for i, m in enumerate(category_iter):
+            category = clean_text(m.group(1))
+            seg_start = m.end()
+            seg_end = category_iter[i + 1].start() if i + 1 < len(category_iter) else len(list_html)
+            segment = list_html[seg_start:seg_end]
             for anchor in re.findall(
-                r"<a[^>]*href=\"[^\"]*company_basic\.php\?stk_code=\d+[^\"]*\"[^>]*>(.*?)</a>",
-                list_html,
+                r"<a[^>]*href=['\"][^'\"]*company_basic\.php\?stk_code=\d+[^'\"]*['\"][^>]*>(.*?)</a>",
+                segment,
                 re.I | re.S,
             ):
                 name = clean_text(anchor)
-                if name:
-                    companies.append(("未標註類別", name))
+                if not name or "外國" in category:
+                    continue
+                companies.append((category, name))
+    else:
+        for anchor in re.findall(
+            r"<a[^>]*href=['\"][^'\"]*company_basic\.php\?stk_code=\d+[^'\"]*['\"][^>]*>(.*?)</a>",
+            list_html,
+            re.I | re.S,
+        ):
+            name = clean_text(anchor)
+            if name:
+                companies.append(("未標註類別", name))
 
-        dedup = list(OrderedDict.fromkeys(companies))
-        if dedup:
-            out[stage_name] = dedup
+    return list(OrderedDict.fromkeys(companies))
+
+
+def _guess_stage_name(prefix_html: str, fallback_idx: int) -> str:
+    candidates = re.findall(
+        r"<span[^>]*class=['\"][^'\"]*ui-dialog-title[^'\"]*['\"][^>]*>(.*?)</span>|"
+        r"<div[^>]*class=['\"][^'\"]*(?:step|title|chain)[^'\"]*['\"][^>]*>(.*?)</div>",
+        prefix_html,
+        re.I | re.S,
+    )
+    texts = []
+    for a, b in candidates:
+        t = clean_text(a or b)
+        if 1 <= len(t) <= 80:
+            texts.append(t)
+    if texts:
+        return texts[-1]
+    return f"未命名步驟_{fallback_idx}"
+
+
+def parse_popup_sections(html: str) -> Dict[str, List[Tuple[str, str]]]:
+    out: Dict[str, List[Tuple[str, str]]] = OrderedDict()
+
+    # 先嘗試精準模式（title + company-list）
+    strict_pattern = re.compile(
+        r"<div[^>]*class=['\"][^'\"]*ui-dialog-titlebar[^'\"]*['\"][^>]*>"
+        r".*?<span[^>]*class=['\"][^'\"]*ui-dialog-title[^'\"]*['\"][^>]*>(.*?)</span>"
+        r".*?<div[^>]*class=['\"][^'\"]*company-list[^'\"]*['\"][^>]*>(.*?)</div>",
+        re.I | re.S,
+    )
+    for title_html, list_html in strict_pattern.findall(html):
+        stage_name = clean_text(title_html)
+        if not stage_name:
+            continue
+        rows = _extract_companies_with_categories(list_html)
+        if rows:
+            out[stage_name] = rows
+
+    if out:
+        return out
+
+    # fallback: 只找 company-list，再從前文猜步驟名稱
+    list_pattern = re.compile(r"<div[^>]*class=['\"][^'\"]*company-list[^'\"]*['\"][^>]*>(.*?)</div>", re.I | re.S)
+    for idx, m in enumerate(list_pattern.finditer(html), start=1):
+        list_html = m.group(1)
+        rows = _extract_companies_with_categories(list_html)
+        if not rows:
+            continue
+        prefix = html[max(0, m.start() - 2000):m.start()]
+        stage_name = _guess_stage_name(prefix, idx)
+        if stage_name in out:
+            out[stage_name].extend(rows)
+            out[stage_name] = list(OrderedDict.fromkeys(out[stage_name]))
+        else:
+            out[stage_name] = rows
+
+    if out:
+        return out
+
+    # 最後 fallback：全頁公司連結至少先輸出，避免直接 RuntimeError
+    all_companies = []
+    for anchor in re.findall(
+        r"<a[^>]*href=['\"][^'\"]*company_basic\.php\?stk_code=\d+[^'\"]*['\"][^>]*>(.*?)</a>",
+        html,
+        re.I | re.S,
+    ):
+        name = clean_text(anchor)
+        if name:
+            all_companies.append(("未標註類別", name))
+    dedup = list(OrderedDict.fromkeys(all_companies))
+    if dedup:
+        out["未分類步驟"] = dedup
 
     return out
 
