@@ -202,6 +202,8 @@ def parse_popup_sections(html: str) -> Dict[str, List[Tuple[str, str]]]:
                 panel_id = sid
             fallback_index += 1
         level_hint = level_by_stage_id.get(panel_id, "未分類")
+        if level_hint == "未分類":
+            level_hint = infer_chain_level(stage_name)
         if level_hint != "未分類":
             stage_name = f"{level_hint}::{stage_name}"
         out[stage_name] = rows
