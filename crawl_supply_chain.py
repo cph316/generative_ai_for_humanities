@@ -102,9 +102,21 @@ def _extract_two_layer_rows(panel_html: str) -> List[Tuple[str, str]]:
         return []
 
     out: List[Tuple[str, str]] = []
+    category_tokens = (
+        "本國上市公司",
+        "本國上櫃公司",
+        "本國興櫃公司",
+        "本國公發公司",
+        "外國上市公司",
+        "外國上櫃公司",
+        "外國興櫃公司",
+        "外國公發公司",
+        "創櫃公司",
+        "知名外國企業",
+    )
     for i, m in enumerate(markers):
         substep = clean_text(m.group(1)).lstrip("▶► ").strip()
-        if substep.startswith("本國") or "外國企業" in substep:
+        if substep in category_tokens or substep.startswith("本國") or substep.startswith("外國") or "外國企業" in substep:
             continue
 
         start = m.end()
@@ -170,6 +182,8 @@ def parse_popup_sections(html: str) -> Dict[str, List[Tuple[str, str]]]:
             level_by_stage_id[sid] = level
 
     panel_starts = list(re.finditer(r'<div[^>]*id=["\']sc-ind-pnl_([^"\']+)["\'][^>]*>', html, re.I))
+    fallback_stage_links = list(re.finditer(r'<div[^>]*id=["\']sc_link_(D\d+)["\'][^>]*>(.*?)</div>', html, re.I | re.S))
+    fallback_index = 0
     for idx, m in enumerate(panel_starts, start=1):
         panel_id = m.group(1).upper()
         start = m.end()
@@ -180,6 +194,13 @@ def parse_popup_sections(html: str) -> Dict[str, List[Tuple[str, str]]]:
             continue
         prefix = html[max(0, m.start() - 4000):m.start()]
         stage_name = stage_name_by_id.get(panel_id) or _extract_stage_title(prefix, f"半導體步驟_{idx}")
+        if (stage_name.startswith("共") and stage_name.endswith("家") or stage_name.startswith("半導體步驟_")) and fallback_index < len(fallback_stage_links):
+            sid = fallback_stage_links[fallback_index].group(1).upper()
+            txt = clean_text(fallback_stage_links[fallback_index].group(2))
+            if txt:
+                stage_name = txt
+                panel_id = sid
+            fallback_index += 1
         level_hint = level_by_stage_id.get(panel_id, "未分類")
         if level_hint != "未分類":
             stage_name = f"{level_hint}::{stage_name}"
