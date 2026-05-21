@@ -116,7 +116,13 @@ def _extract_two_layer_rows(panel_html: str) -> List[Tuple[str, str]]:
     )
     for i, m in enumerate(markers):
         substep = clean_text(m.group(1)).lstrip("▶► ").strip()
-        if substep in category_tokens or substep.startswith("本國") or substep.startswith("外國") or "外國企業" in substep:
+        if (
+            substep in {"►", "▶"}
+            or substep in category_tokens
+            or substep.startswith("本國")
+            or substep.startswith("外國")
+            or "外國企業" in substep
+        ):
             continue
 
         start = m.end()
@@ -163,11 +169,15 @@ def _extract_panel_heading(panel_html: str) -> str:
         re.I,
     )
     head = panel_html[: category_pos.start()] if category_pos else panel_html[:1200]
-    for m in re.finditer(r">([^<>]{2,40})<", head):
+    for m in re.finditer(r">([^<>]{2,60})<", head):
         t = clean_text(m.group(1))
-        if not t or "家" in t or "公司" in t or t.startswith("共"):
+        if not t or t in {"►", "▶"} or re.fullmatch(r"[►▶\s]+", t):
+            continue
+        if "家" in t or "公司" in t or t.startswith("共"):
             continue
         if any(ch in t for ch in ("上游", "中游", "下游")):
+            continue
+        if len(t) < 2:
             continue
         return t
     return ""
