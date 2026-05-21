@@ -177,16 +177,18 @@ def parse_popup_sections(html: str) -> Dict[str, List[Tuple[str, str]]]:
         if text:
             stage_name_by_id[sid] = text
 
-        numeric_match = re.search(r"(\d+)$", sid)
-        if not numeric_match:
-            continue
-        numeric_id = int(numeric_match.group(1))
-        if sid.startswith("DC") or numeric_id < 130:
-            level = "上游"
-        elif numeric_id < 150:
-            level = "中游"
-        else:
-            level = "下游"
+        level = infer_chain_level(text)
+        if level == "未分類":
+            numeric_match = re.search(r"(\d+)$", sid)
+            if not numeric_match:
+                continue
+            numeric_id = int(numeric_match.group(1))
+            if sid.startswith("DC") or numeric_id < 130:
+                level = "上游"
+            elif numeric_id < 150:
+                level = "中游"
+            else:
+                level = "下游"
 
         if level != "未分類":
             level_by_stage_id[sid] = level
