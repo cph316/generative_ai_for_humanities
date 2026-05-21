@@ -145,6 +145,23 @@ def _normalize_stage_name(stage_name: str) -> str:
     return re.sub(r"^(上游|中游|下游)::", "", stage_name)
 
 
+def _extract_panel_heading(panel_html: str) -> str:
+    category_pos = re.search(
+        r"(本國上市公司|本國上櫃公司|本國興櫃公司|本國公發公司|外國上市公司|外國上櫃公司|外國興櫃公司|外國公發公司|創櫃公司|知名外國企業)\s*\(\d+家\)",
+        panel_html,
+        re.I,
+    )
+    head = panel_html[: category_pos.start()] if category_pos else panel_html[:1200]
+    for m in re.finditer(r">([^<>]{2,40})<", head):
+        t = clean_text(m.group(1))
+        if not t or "家" in t or "公司" in t or t.startswith("共"):
+            continue
+        if any(ch in t for ch in ("上游", "中游", "下游")):
+            continue
+        return t
+    return ""
+
+
 def parse_popup_sections(html: str) -> Dict[str, List[Tuple[str, str]]]:
     out: Dict[str, List[Tuple[str, str]]] = OrderedDict()
 
@@ -206,6 +223,9 @@ def parse_popup_sections(html: str) -> Dict[str, List[Tuple[str, str]]]:
             continue
         prefix = html[max(0, m.start() - 4000):m.start()]
         stage_name = stage_name_by_id.get(panel_id) or _extract_stage_title(prefix, f"半導體步驟_{idx}")
+        panel_heading = _extract_panel_heading(panel_html)
+        if panel_heading:
+            stage_name = panel_heading
         if (stage_name.startswith("共") and stage_name.endswith("家") or stage_name.startswith("半導體步驟_")) and fallback_index < len(fallback_stage_links):
             sid = fallback_stage_links[fallback_index].group(1).upper()
             txt = clean_text(fallback_stage_links[fallback_index].group(2))
