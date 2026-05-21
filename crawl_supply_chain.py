@@ -145,6 +145,17 @@ def _normalize_stage_name(stage_name: str) -> str:
     return re.sub(r"^(上游|中游|下游)::", "", stage_name)
 
 
+def _stage_id_to_int(stage_id: str) -> int | None:
+    sid = stage_id.upper()
+    if sid.startswith("DC") and sid[2:].isdigit():
+        return int(sid[2:])
+    if sid.startswith("D"):
+        token = sid[1:]
+        if re.fullmatch(r"[0-9A-F]+", token):
+            return int(token, 16)
+    return None
+
+
 def _extract_panel_heading(panel_html: str) -> str:
     category_pos = re.search(
         r"(本國上市公司|本國上櫃公司|本國興櫃公司|本國公發公司|外國上市公司|外國上櫃公司|外國興櫃公司|外國公發公司|創櫃公司|知名外國企業)\s*\(\d+家\)",
@@ -183,7 +194,7 @@ def parse_popup_sections(html: str) -> Dict[str, List[Tuple[str, str]]]:
     stage_name_by_id = {}
     stage_link_matches = list(
         re.finditer(
-            r'<div[^>]*id=["\'](?:sc_link_|ic_link_)(D[C]?\d+)["\'][^>]*>(.*?)</div>',
+            r'<div[^>]*id=["\'](?:sc_link_|ic_link_)(D[0-9A-F]+|DC\d+)["\'][^>]*>(.*?)</div>',
             html,
             re.I | re.S,
         )
@@ -196,10 +207,9 @@ def parse_popup_sections(html: str) -> Dict[str, List[Tuple[str, str]]]:
 
         level = infer_chain_level(text)
         if level == "未分類":
-            numeric_match = re.search(r"(\d+)$", sid)
-            if not numeric_match:
+            numeric_id = _stage_id_to_int(sid)
+            if numeric_id is None:
                 continue
-            numeric_id = int(numeric_match.group(1))
             if sid.startswith("DC") or numeric_id < 130:
                 level = "上游"
             elif numeric_id < 150:
