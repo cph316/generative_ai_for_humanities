@@ -164,14 +164,24 @@ def parse_popup_sections(html: str) -> Dict[str, List[Tuple[str, str]]]:
     # B: panel 型（不依賴固定 </div></div> 結尾）
     level_by_stage_id = {}
     stage_name_by_id = {}
-    for m in re.finditer(r'<div[^>]*id=["\']sc_link_(D\d+)["\'][^>]*>(.*?)</div>', html, re.I | re.S):
+    stage_link_matches = list(
+        re.finditer(
+            r'<div[^>]*id=["\'](?:sc_link_|ic_link_)(D[C]?\d+)["\'][^>]*>(.*?)</div>',
+            html,
+            re.I | re.S,
+        )
+    )
+    for m in stage_link_matches:
         sid = m.group(1).upper()
         text = clean_text(m.group(2))
         if text:
             stage_name_by_id[sid] = text
 
-        numeric_id = int(sid[1:])
-        if numeric_id < 130:
+        numeric_match = re.search(r"(\d+)$", sid)
+        if not numeric_match:
+            continue
+        numeric_id = int(numeric_match.group(1))
+        if sid.startswith("DC") or numeric_id < 130:
             level = "上游"
         elif numeric_id < 150:
             level = "中游"
@@ -182,7 +192,7 @@ def parse_popup_sections(html: str) -> Dict[str, List[Tuple[str, str]]]:
             level_by_stage_id[sid] = level
 
     panel_starts = list(re.finditer(r'<div[^>]*id=["\']sc-ind-pnl_([^"\']+)["\'][^>]*>', html, re.I))
-    fallback_stage_links = list(re.finditer(r'<div[^>]*id=["\']sc_link_(D\d+)["\'][^>]*>(.*?)</div>', html, re.I | re.S))
+    fallback_stage_links = stage_link_matches
     fallback_index = 0
     for idx, m in enumerate(panel_starts, start=1):
         panel_id = m.group(1).upper()
