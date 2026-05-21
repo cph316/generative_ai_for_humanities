@@ -4,13 +4,19 @@ from __future__ import annotations
 
 import argparse
 import re
+from collections import OrderedDict
 from html import unescape
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 import requests
 
 BASE_URL = "https://ic.tpex.org.tw/introduce.php"
+
+# 依中文語意粗分供應鏈位置（僅輔助標籤，不影響實際公司歸屬）
+UPSTREAM_KEYWORDS = ("材料", "基板", "矽晶圓", "設備", "化學", "氣體", "光罩")
+MIDSTREAM_KEYWORDS = ("設計", "晶圓", "製造", "製程", "代工", "IP", "IC")
+DOWNSTREAM_KEYWORDS = ("封裝", "測試", "模組", "通路", "組裝", "終端")
 
 
 def fetch_html(ic_code: str, timeout: int = 30) -> str:
@@ -33,55 +39,100 @@ def clean_text(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
-def extract_stage_names(html: str) -> List[str]:
-    # 抓產業鏈方塊常見標題
-    candidates = re.findall(r">\s*([^<>]{1,20}(?:設計|製程|封裝|測試|設備|材料|晶圓)[^<>]{0,10})\s*<", html)
-    stage_names = []
-    for c in candidates:
-        c = clean_text(c)
-        if c and c not in stage_names:
-            stage_names.append(c)
-    return stage_names
+def infer_chain_level(stage_name: str) -> str:
+    if any(k in stage_name for k in UPSTREAM_KEYWORDS):
+        return "上游"
+    if any(k in stage_name for k in DOWNSTREAM_KEYWORDS):
+        return "下游"
+    if any(k in stage_name for k in MIDSTREAM_KEYWORDS):
+        return "中游"
+    return "未分類"
 
 
-def extract_companies(html: str) -> List[str]:
-    # 公司連結通常長這樣: company_basic.php?stk_code=xxxx
-    matches = re.findall(r"<a[^>]*href=\"[^\"]*company_basic\.php\?stk_code=\d+[^\"]*\"[^>]*>(.*?)</a>", html, re.I | re.S)
-    companies = []
-    for m in matches:
-        name = clean_text(m)
-        if name and "外國" not in name and name not in companies:
-            companies.append(name)
-    return companies
+def parse_popup_sections(html: str) -> Dict[str, List[Tuple[str, str]]]:
+    """解析每個步驟視窗中的公司清單。
+
+    回傳格式:
+        {步驟名稱: [(公司類型, 公司名稱), ...]}
+    """
+    # 常見：每個 popup 會先出現步驟標題，再包含 company-list 區塊。
+    # 用非貪婪方式配對，避免跨到下一個區塊。
+    pattern = re.compile(
+        r"<div[^>]*class=\"[^\"]*ui-dialog-titlebar[^\"]*\"[^>]*>"
+        r".*?<span[^>]*class=\"[^\"]*ui-dialog-title[^\"]*\"[^>]*>(.*?)</span>"
+        r"(.*?)"
+        r"<div[^>]*class=\"[^\"]*company-list[^\"]*\"[^>]*>(.*?)</div>",
+        re.I | re.S,
+    )
+
+    out: Dict[str, List[Tuple[str, str]]] = OrderedDict()
+
+    for title_html, between_html, list_html in pattern.findall(html):
+        stage_name = clean_text(title_html)
+        if not stage_name or len(stage_name) > 80:
+            continue
+
+        # 在 company-list 內找分組標題（例如本國上市公司、本國上櫃公司）與公司名。
+        # 分段切法：先抓所有分類標題位置，再切片抓該段公司。
+        category_iter = list(
+            re.finditer(
+                r"(本國上市公司|本國上櫃公司|本國興櫃公司|本國公發公司|知名外國企業)\s*\(\d+家\)",
+                list_html,
+                re.I,
+            )
+        )
+
+        companies: List[Tuple[str, str]] = []
+        if category_iter:
+            for i, m in enumerate(category_iter):
+                category = clean_text(m.group(1))
+                seg_start = m.end()
+                seg_end = category_iter[i + 1].start() if i + 1 < len(category_iter) else len(list_html)
+                segment = list_html[seg_start:seg_end]
+                for anchor in re.findall(
+                    r"<a[^>]*href=\"[^\"]*company_basic\.php\?stk_code=\d+[^\"]*\"[^>]*>(.*?)</a>",
+                    segment,
+                    re.I | re.S,
+                ):
+                    name = clean_text(anchor)
+                    if not name:
+                        continue
+                    if "外國" in category:
+                        continue
+                    companies.append((category, name))
+        else:
+            for anchor in re.findall(
+                r"<a[^>]*href=\"[^\"]*company_basic\.php\?stk_code=\d+[^\"]*\"[^>]*>(.*?)</a>",
+                list_html,
+                re.I | re.S,
+            ):
+                name = clean_text(anchor)
+                if name:
+                    companies.append(("未標註類別", name))
+
+        dedup = list(OrderedDict.fromkeys(companies))
+        if dedup:
+            out[stage_name] = dedup
+
+    return out
 
 
-def extract_stage_companies(html: str) -> Dict[str, List[str]]:
-    stage_names = extract_stage_names(html)
-    companies = extract_companies(html)
-
-    if not companies:
-        return {}
-
-    # 網站資料區塊常是滑出視窗，HTML 內不一定直接綁定步驟；保守作法：
-    # 若步驟存在，先平均分桶；否則放在未分類。
-    if not stage_names:
-        return {"未分類步驟": companies}
-
-    result: Dict[str, List[str]] = {name: [] for name in stage_names}
-    for idx, company in enumerate(companies):
-        stage = stage_names[idx % len(stage_names)]
-        result[stage].append(company)
-
-    return result
-
-
-def save_to_txt(data: Dict[str, List[str]], output_path: Path) -> None:
+def save_to_txt(data: Dict[str, List[Tuple[str, str]]], output_path: Path) -> None:
     lines: List[str] = []
-    for stage, companies in data.items():
-        lines.append(f"[{stage}]")
-        for company in sorted(set(companies)):
-            lines.append(f"- {company}")
+    for stage, company_rows in data.items():
+        chain_level = infer_chain_level(stage)
+        lines.append(f"[{chain_level}] {stage}")
+
+        grouped: Dict[str, List[str]] = OrderedDict()
+        for category, company in company_rows:
+            grouped.setdefault(category, []).append(company)
+
+        for category, companies in grouped.items():
+            lines.append(f"  ({category})")
+            for company in sorted(set(companies)):
+                lines.append(f"  - {company}")
         lines.append("")
+
     output_path.write_text("\n".join(lines).strip() + "\n", encoding="utf-8")
 
 
@@ -92,7 +143,7 @@ def main() -> None:
     args = parser.parse_args()
 
     html = fetch_html(args.ic)
-    data = extract_stage_companies(html)
+    data = parse_popup_sections(html)
     if not data:
         raise RuntimeError("沒有抓到任何公司資料，請檢查網站是否擋爬蟲或結構已變更。")
 
