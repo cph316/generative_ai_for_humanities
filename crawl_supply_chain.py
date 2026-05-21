@@ -42,6 +42,12 @@ def clean_text(text: str) -> str:
 
 
 def infer_chain_level(stage_name: str) -> str:
+    if stage_name.startswith("上游::"):
+        return "上游"
+    if stage_name.startswith("中游::"):
+        return "中游"
+    if stage_name.startswith("下游::"):
+        return "下游"
     if any(k in stage_name for k in UPSTREAM_KEYWORDS):
         return "上游"
     if any(k in stage_name for k in DOWNSTREAM_KEYWORDS):
@@ -123,6 +129,10 @@ def _extract_stage_title(prefix_html: str, default_name: str) -> str:
     return clean_text(next((x for x in latest if x), default_name)) or default_name
 
 
+def _normalize_stage_name(stage_name: str) -> str:
+    return re.sub(r"^(上游|中游|下游)::", "", stage_name)
+
+
 def parse_popup_sections(html: str) -> Dict[str, List[Tuple[str, str]]]:
     out: Dict[str, List[Tuple[str, str]]] = OrderedDict()
 
@@ -140,8 +150,17 @@ def parse_popup_sections(html: str) -> Dict[str, List[Tuple[str, str]]]:
             out[stage_name] = rows
 
     # B: panel 型（不依賴固定 </div></div> 結尾）
-    panel_starts = list(re.finditer(r'<div[^>]*id=["\']sc-ind-pnl_[^"\']+["\'][^>]*>', html, re.I))
+    level_by_stage_id = {}
+    for m in re.finditer(r'<div[^>]*id=[""]sc_link_(D\d+)[""][^>]*>(.*?)</div>', html, re.I | re.S):
+        sid = m.group(1).upper()
+        text = clean_text(m.group(2))
+        level = infer_chain_level(text)
+        if level != "未分類":
+            level_by_stage_id[sid] = level
+
+    panel_starts = list(re.finditer(r'<div[^>]*id=["\']sc-ind-pnl_([^"\']+)["\'][^>]*>', html, re.I))
     for idx, m in enumerate(panel_starts, start=1):
+        panel_id = m.group(1).upper()
         start = m.end()
         end = panel_starts[idx].start() if idx < len(panel_starts) else min(len(html), start + 30000)
         panel_html = html[start:end]
@@ -150,6 +169,9 @@ def parse_popup_sections(html: str) -> Dict[str, List[Tuple[str, str]]]:
             continue
         prefix = html[max(0, m.start() - 4000):m.start()]
         stage_name = _extract_stage_title(prefix, f"半導體步驟_{idx}")
+        level_hint = level_by_stage_id.get(panel_id, "未分類")
+        if level_hint != "未分類":
+            stage_name = f"{level_hint}::{stage_name}"
         out[stage_name] = rows
 
     # C: 最後保底：全頁有公司就收斂成單一步驟，避免直接 RuntimeError
@@ -164,7 +186,7 @@ def parse_popup_sections(html: str) -> Dict[str, List[Tuple[str, str]]]:
 def save_to_txt(data: Dict[str, List[Tuple[str, str]]], output_path: Path) -> None:
     lines: List[str] = []
     for stage, rows in data.items():
-        lines.append(f"[{infer_chain_level(stage)}] {stage}")
+        lines.append(f"[{infer_chain_level(stage)}] {_normalize_stage_name(stage)}")
         grouped: Dict[str, List[str]] = OrderedDict()
         for tag, company in rows:
             grouped.setdefault(tag, []).append(company)
@@ -175,7 +197,7 @@ def save_to_txt(data: Dict[str, List[Tuple[str, str]]], output_path: Path) -> No
                 lines.append(f"  - {c}")
         lines.append("")
 
-    output_path.write_text("\\n".join(lines).strip() + "\\n", encoding="utf-8")
+    output_path.write_text("\n".join(lines).strip() + "\n", encoding="utf-8")
 
 
 def main() -> None:
