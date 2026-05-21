@@ -60,7 +60,7 @@ def infer_chain_level(stage_name: str) -> str:
 def _extract_companies_with_categories(html_fragment: str) -> List[Tuple[str, str]]:
     category_iter = list(
         re.finditer(
-            r"(本國上市公司|本國上櫃公司|本國興櫃公司|本國公發公司|知名外國企業)\s*\(\d+家\)",
+            r"((?:本國|外國)[上市上櫃興櫃公發]*公司|創櫃公司|知名外國企業)\s*\(\d+家\)",
             html_fragment,
             re.I,
         )
@@ -79,7 +79,7 @@ def _extract_companies_with_categories(html_fragment: str) -> List[Tuple[str, st
                 re.I | re.S,
             ):
                 company = clean_text(anchor)
-                if company and "外國" not in category:
+                if company:
                     rows.append((category, company))
     else:
         for anchor in re.findall(
@@ -151,10 +151,21 @@ def parse_popup_sections(html: str) -> Dict[str, List[Tuple[str, str]]]:
 
     # B: panel 型（不依賴固定 </div></div> 結尾）
     level_by_stage_id = {}
-    for m in re.finditer(r'<div[^>]*id=[""]sc_link_(D\d+)[""][^>]*>(.*?)</div>', html, re.I | re.S):
+    stage_name_by_id = {}
+    for m in re.finditer(r'<div[^>]*id=["\']sc_link_(D\d+)["\'][^>]*>(.*?)</div>', html, re.I | re.S):
         sid = m.group(1).upper()
         text = clean_text(m.group(2))
-        level = infer_chain_level(text)
+        if text:
+            stage_name_by_id[sid] = text
+
+        numeric_id = int(sid[1:])
+        if numeric_id < 130:
+            level = "上游"
+        elif numeric_id < 150:
+            level = "中游"
+        else:
+            level = "下游"
+
         if level != "未分類":
             level_by_stage_id[sid] = level
 
@@ -168,7 +179,7 @@ def parse_popup_sections(html: str) -> Dict[str, List[Tuple[str, str]]]:
         if not rows:
             continue
         prefix = html[max(0, m.start() - 4000):m.start()]
-        stage_name = _extract_stage_title(prefix, f"半導體步驟_{idx}")
+        stage_name = stage_name_by_id.get(panel_id) or _extract_stage_title(prefix, f"半導體步驟_{idx}")
         level_hint = level_by_stage_id.get(panel_id, "未分類")
         if level_hint != "未分類":
             stage_name = f"{level_hint}::{stage_name}"
