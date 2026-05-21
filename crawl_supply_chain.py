@@ -25,8 +25,12 @@ def fetch_html(ic_code: str, timeout: int = 30) -> str:
             "Chrome/124.0.0.0 Safari/537.36"
         )
     }
-    response = requests.get(BASE_URL, params={"ic": ic_code}, headers=headers, timeout=timeout)
-    response.raise_for_status()
+    try:
+        response = requests.get(BASE_URL, params={"ic": ic_code}, headers=headers, timeout=timeout)
+        response.raise_for_status()
+    except requests.RequestException as exc:
+        raise RuntimeError(f"無法連到櫃買中心站台（{BASE_URL}）：{exc}") from exc
+
     response.encoding = response.apparent_encoding
     return response.text
 
@@ -64,7 +68,7 @@ def _extract_companies_with_categories(html_fragment: str) -> List[Tuple[str, st
             seg_end = category_iter[i + 1].start() if i + 1 < len(category_iter) else len(html_fragment)
             segment = html_fragment[seg_start:seg_end]
             for anchor in re.findall(
-                r"<a[^>]*href=['\"][^'\"]*company_basic\.php\?stk_code=\d+[^'\"]*['\"][^>]*>(.*?)</a>",
+                r'<a[^>]*href=["\'][^"\']*company_basic\.php\?stk_code=\d+[^"\']*["\'][^>]*>(.*?)</a>',
                 segment,
                 re.I | re.S,
             ):
@@ -73,7 +77,7 @@ def _extract_companies_with_categories(html_fragment: str) -> List[Tuple[str, st
                     rows.append((category, company))
     else:
         for anchor in re.findall(
-            r"<a[^>]*href=['\"][^'\"]*company_basic\.php\?stk_code=\d+[^'\"]*['\"][^>]*>(.*?)</a>",
+            r'<a[^>]*href=["\'][^"\']*company_basic\.php\?stk_code=\d+[^"\']*["\'][^>]*>(.*?)</a>',
             html_fragment,
             re.I | re.S,
         ):
@@ -86,7 +90,7 @@ def _extract_companies_with_categories(html_fragment: str) -> List[Tuple[str, st
 
 def _extract_two_layer_rows(panel_html: str) -> List[Tuple[str, str]]:
     """解析兩層結構：子分類(例如 LED驅動IC) -> 公司分類 -> 公司。"""
-    marker_pattern = re.compile(r"(?:^|>|\n|\r|&#9658;|▶|►)\s*([^<>]{2,40}?)\s*\(\d+家\)", re.I)
+    marker_pattern = re.compile(r"(?:^|>|\n|\r|&#9658;|▶|►)\s*([^<>]{2,50}?)\s*\(\d+家\)", re.I)
     markers = list(marker_pattern.finditer(panel_html))
     if not markers:
         return []
@@ -94,7 +98,7 @@ def _extract_two_layer_rows(panel_html: str) -> List[Tuple[str, str]]:
     out: List[Tuple[str, str]] = []
     for i, m in enumerate(markers):
         substep = clean_text(m.group(1)).lstrip("▶► ").strip()
-        if (substep.startswith("本國") or "外國企業" in substep or "上市公司" in substep or "上櫃公司" in substep or "興櫃公司" in substep or "公發公司" in substep):
+        if substep.startswith("本國") or "外國企業" in substep:
             continue
 
         start = m.end()
@@ -107,48 +111,52 @@ def _extract_two_layer_rows(panel_html: str) -> List[Tuple[str, str]]:
     return list(OrderedDict.fromkeys(out))
 
 
+def _extract_stage_title(prefix_html: str, default_name: str) -> str:
+    matches = re.findall(
+        r'<h\d[^>]*>(.*?)</h\d>|<div[^>]*class=["\'][^"\']*subchain-name[^"\']*["\'][^>]*>(.*?)</div>|<span[^>]*>([^<>]{2,40})</span>',
+        prefix_html,
+        re.I | re.S,
+    )
+    if not matches:
+        return default_name
+    latest = matches[-1]
+    return clean_text(next((x for x in latest if x), default_name)) or default_name
+
+
 def parse_popup_sections(html: str) -> Dict[str, List[Tuple[str, str]]]:
     out: Dict[str, List[Tuple[str, str]]] = OrderedDict()
 
+    # A: dialog/popup 型
     strict_pattern = re.compile(
-        r"<div[^>]*class=['\"][^'\"]*ui-dialog-titlebar[^'\"]*['\"][^>]*>"
-        r".*?<span[^>]*class=['\"][^'\"]*ui-dialog-title[^'\"]*['\"][^>]*>(.*?)</span>"
-        r".*?<div[^>]*class=['\"][^'\"]*company-list[^'\"]*['\"][^>]*>(.*?)</div>",
+        r'<div[^>]*class=["\'][^"\']*ui-dialog-titlebar[^"\']*["\'][^>]*>'
+        r'.*?<span[^>]*class=["\'][^"\']*ui-dialog-title[^"\']*["\'][^>]*>(.*?)</span>'
+        r'.*?<div[^>]*class=["\'][^"\']*company-list[^"\']*["\'][^>]*>(.*?)</div>',
         re.I | re.S,
     )
-
     for title_html, list_html in strict_pattern.findall(html):
         stage_name = clean_text(title_html)
-        if not stage_name:
-            continue
-
-        # 先嘗試兩層，再回退到一層
-        rows = _extract_two_layer_rows(list_html)
-        if not rows:
-            rows = _extract_companies_with_categories(list_html)
-        if rows:
+        rows = _extract_two_layer_rows(list_html) or _extract_companies_with_categories(list_html)
+        if stage_name and rows:
             out[stage_name] = rows
 
-    if out:
-        return out
-
-    # fallback: 針對半導體頁面常見 subchain-company-list 區塊
-    panel_pattern = re.compile(
-        r"<div[^>]*id=['\"]sc-ind-pnl_[^'\"]+['\"][^>]*>(.*?)</div>\s*</div>",
-        re.I | re.S,
-    )
-    for idx, m in enumerate(panel_pattern.finditer(html), start=1):
-        panel_html = m.group(1)
-        rows = _extract_two_layer_rows(panel_html)
-        if not rows:
-            rows = _extract_companies_with_categories(panel_html)
+    # B: panel 型（不依賴固定 </div></div> 結尾）
+    panel_starts = list(re.finditer(r'<div[^>]*id=["\']sc-ind-pnl_[^"\']+["\'][^>]*>', html, re.I))
+    for idx, m in enumerate(panel_starts, start=1):
+        start = m.end()
+        end = panel_starts[idx].start() if idx < len(panel_starts) else min(len(html), start + 30000)
+        panel_html = html[start:end]
+        rows = _extract_two_layer_rows(panel_html) or _extract_companies_with_categories(panel_html)
         if not rows:
             continue
-
-        prefix = html[max(0, m.start() - 3000):m.start()]
-        title_match = re.findall(r"<h\d[^>]*>(.*?)</h\d>|<span[^>]*>([^<>]{2,30})</span>", prefix, re.I | re.S)
-        stage_name = clean_text((title_match[-1][0] or title_match[-1][1])) if title_match else f"未命名步驟_{idx}"
+        prefix = html[max(0, m.start() - 4000):m.start()]
+        stage_name = _extract_stage_title(prefix, f"半導體步驟_{idx}")
         out[stage_name] = rows
+
+    # C: 最後保底：全頁有公司就收斂成單一步驟，避免直接 RuntimeError
+    if not out:
+        rows = _extract_two_layer_rows(html) or _extract_companies_with_categories(html)
+        if rows:
+            out["半導體產業鏈"] = rows
 
     return out
 
@@ -167,7 +175,7 @@ def save_to_txt(data: Dict[str, List[Tuple[str, str]]], output_path: Path) -> No
                 lines.append(f"  - {c}")
         lines.append("")
 
-    output_path.write_text("\n".join(lines).strip() + "\n", encoding="utf-8")
+    output_path.write_text("\\n".join(lines).strip() + "\\n", encoding="utf-8")
 
 
 def main() -> None:
@@ -182,7 +190,7 @@ def main() -> None:
     html = fetch_html(args.ic)
     data = parse_popup_sections(html)
     if not data:
-        raise RuntimeError("沒有抓到任何公司資料，請檢查網站結構或連線是否正常。")
+        raise RuntimeError("沒有抓到任何公司資料；請確認網頁是否含公司清單，或稍後再試。")
 
     save_to_txt(data, Path(args.output))
     print(f"完成：共 {len(data)} 個步驟，已輸出到 {args.output}")
