@@ -256,11 +256,21 @@ def save_to_txt(data: Dict[str, List[Tuple[str, str]]], output_path: Path) -> No
         grouped: Dict[str, List[str]] = OrderedDict()
         for tag, company in rows:
             grouped.setdefault(tag, []).append(company)
-
+        subtitle_grouped: Dict[str, Dict[str, List[str]]] = OrderedDict()
         for tag, companies in grouped.items():
-            lines.append(f"  ({tag})")
-            for c in sorted(set(companies)):
-                lines.append(f"  - {c}")
+            if "｜" in tag:
+                subtitle, category = tag.split("｜", 1)
+                subtitle_grouped.setdefault(subtitle, OrderedDict()).setdefault(category, []).extend(companies)
+            else:
+                subtitle_grouped.setdefault("未分子標題", OrderedDict()).setdefault(tag, []).extend(companies)
+
+        for subtitle, category_map in subtitle_grouped.items():
+            if subtitle != "未分子標題":
+                lines.append(f"  <子標題> {subtitle}")
+            for category, companies in category_map.items():
+                lines.append(f"  ({category})")
+                for c in sorted(set(companies)):
+                    lines.append(f"  - {c}")
         lines.append("")
 
     output_path.write_text("\n".join(lines).strip() + "\n", encoding="utf-8")
